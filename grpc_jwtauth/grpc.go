@@ -22,7 +22,7 @@ func authFunc(verifier Verifier) grpc_auth.AuthFunc {
 
 		claims, err := verifier.VerifyJWT(rawToken)
 		if err != nil {
-			return ctx, err
+			return ctx, nil
 		}
 
 		return jwtauth.ToContext(ctx, claims), nil
