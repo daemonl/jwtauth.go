@@ -17,12 +17,15 @@ func authFunc(verifier Verifier) grpc_auth.AuthFunc {
 	return func(ctx context.Context) (context.Context, error) {
 		rawToken, err := grpc_auth.AuthFromMD(ctx, "Bearer")
 		if err != nil {
-			return ctx, err
+			return ctx, nil
+		}
+		if rawToken == "" {
+			return nil, nil
 		}
 
 		claims, err := verifier.VerifyJWT(rawToken)
 		if err != nil {
-			return ctx, nil
+			return ctx, err
 		}
 
 		return jwtauth.ToContext(ctx, claims), nil
