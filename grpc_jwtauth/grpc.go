@@ -15,34 +15,14 @@ type Verifier interface {
 	VerifyJWT(rawKey string) (*jwtauth.VerifiedJWT, error)
 }
 
-type options struct {
-	shouldCheck DeciderFunc
-	allowEmpty  bool
-}
-
-type Option func(*options)
-
-func authFunc(verifier Verifier, opts ...Option) grpc_auth.AuthFunc {
-	cfg := &options{}
-	for _, option := range opts {
-		option(cfg)
-	}
+func authFunc(verifier Verifier) grpc_auth.AuthFunc {
 
 	return func(ctx context.Context) (context.Context, error) {
-		if cfg.shouldCheck != nil {
-			if !cfg.shouldCheck(
-		}
 		rawToken, err := grpc_auth.AuthFromMD(ctx, "Bearer")
 		if err != nil {
-			if cfg.allowEmpty {
-				return nil, nil
-			}
 			return ctx, err
 		}
 		if rawToken == "" {
-			if cfg.allowEmpty {
-				return nil, nil
-			}
 			return nil, status.Error(codes.Unauthenticated, "No Bearer Token")
 		}
 
@@ -55,10 +35,10 @@ func authFunc(verifier Verifier, opts ...Option) grpc_auth.AuthFunc {
 	}
 }
 
-func UnaryServerInterceptor(verifier Verifier, options ...Option) grpc.UnaryServerInterceptor {
-	return grpc_auth.UnaryServerInterceptor(authFunc(verifier, options...))
+func UnaryServerInterceptor(verifier Verifier) grpc.UnaryServerInterceptor {
+	return grpc_auth.UnaryServerInterceptor(authFunc(verifier))
 }
 
-func StreamServerInterceptor(verifier Verifier, opts ...Option) grpc.StreamServerInterceptor {
-	return grpc_auth.StreamServerInterceptor(authFunc(verifier, options...))
+func StreamServerInterceptor(verifier Verifier) grpc.StreamServerInterceptor {
+	return grpc_auth.StreamServerInterceptor(authFunc(verifier))
 }
