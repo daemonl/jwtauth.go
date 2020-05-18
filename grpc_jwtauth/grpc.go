@@ -19,7 +19,10 @@ func authFunc(verifier Verifier, allowEmpty bool) grpc_auth.AuthFunc {
 	return func(ctx context.Context) (context.Context, error) {
 		rawToken, err := grpc_auth.AuthFromMD(ctx, "Bearer")
 		if err != nil {
-			return ctx, nil
+			if allowEmpty {
+				return nil, nil
+			}
+			return ctx, err
 		}
 		if rawToken == "" {
 			if allowEmpty {
