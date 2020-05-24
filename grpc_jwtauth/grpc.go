@@ -28,7 +28,11 @@ func authFunc(verifier Verifier) grpc_auth.AuthFunc {
 
 		claims, err := verifier.VerifyJWT(rawToken)
 		if err != nil {
+			if ae, ok := err.(jwtauth.AuthError); ok {
+				return ctx, status.Error(codes.Unauthenticated, string(ae))
+			}
 			return ctx, err
+
 		}
 
 		return jwtauth.ToContext(ctx, claims), nil
