@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 
 	"gopkg.in/square/go-jose.v2"
 )
@@ -33,6 +32,7 @@ type ServerSet struct {
 	statusAttempt *AnyAllWaitGroup
 	statusSuccess *AnyAllWaitGroup
 	Client        *http.Client
+	ErrorLogger   func(error)
 }
 
 func NewServerSet(urls ...string) (*ServerSet, error) {
@@ -49,16 +49,29 @@ func NewServerSet(urls ...string) (*ServerSet, error) {
 			client: client,
 			url:    url,
 		}
-		go server.loop(statusAttempt.Child(), statusSuccess.Child())
 		servers[idx] = server
 	}
 
-	return &ServerSet{
+	ss := &ServerSet{
 		servers:       servers,
 		statusAttempt: statusAttempt,
 		statusSuccess: statusSuccess,
 		Client:        client,
-	}, nil
+	}
+
+	for _, server := range ss.servers {
+		go server.loop(statusAttempt.Child(), statusSuccess.Child(), ss)
+	}
+
+	return ss, nil
+}
+
+func (ss ServerSet) logError(err error) {
+	if ss.ErrorLogger == nil {
+		log.Printf("Failed to load JWKS: %s. (set ErrorLogger to supress or format this error)", err.Error())
+	} else {
+		ss.ErrorLogger(err)
+	}
 }
 
 func (ss *ServerSet) GetKeys(keyID string) []jose.JSONWebKey {
@@ -94,13 +107,11 @@ type Server struct {
 	lock   sync.RWMutex
 }
 
-func (ss *Server) loop(doneAnything, doneSuccess interface{ Done() }) {
+func (ss *Server) loop(doneAnything, doneSuccess interface{ Done() }, onError interface{ logError(error) }) {
 	for {
 		refreshTime, err := ss.loadKeys()
 		if err != nil {
-			log.WithField("url", ss.url).
-				WithField("error", err.Error()).
-				Info("Failed to load JWKS")
+			onError.logError(fmt.Errorf("failed to read JWKS from %s: %w", ss.url, err))
 		} else {
 			doneSuccess.Done()
 		}

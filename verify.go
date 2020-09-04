@@ -16,7 +16,7 @@ func (err AuthError) Error() string {
 }
 
 type VerifiedJWT struct {
-	Raw []byte
+	Raw map[string]json.RawMessage
 	StandardClaims
 }
 
@@ -32,6 +32,14 @@ func FromContext(ctx context.Context) *VerifiedJWT {
 
 func ToContext(ctx context.Context, verified *VerifiedJWT) context.Context {
 	return context.WithValue(ctx, contextKey, verified)
+}
+
+func (jwt VerifiedJWT) DecodeCustom(key string, into interface{}) error {
+	raw, ok := jwt.Raw[key]
+	if !ok {
+		return fmt.Errorf("token has no key %s", key)
+	}
+	return json.Unmarshal(raw, into)
 }
 
 type StandardClaims struct {
@@ -123,12 +131,17 @@ func (verifier *Verifier) VerifyJWT(rawKey string) (*VerifiedJWT, error) {
 		return nil, AuthError("Invalid Token Data")
 	}
 
+	rawClaims := map[string]json.RawMessage{}
+	if err := json.Unmarshal(verifiedBytes, &rawClaims); err != nil {
+		return nil, AuthError("Invalid Token Data")
+	}
+
 	if time.Unix(standardClaims.Expiry, 0).Before(time.Now()) {
 		return nil, AuthError("Expired Token")
 	}
 
 	return &VerifiedJWT{
-		Raw:            []byte(verifiedBytes),
+		Raw:            rawClaims,
 		StandardClaims: standardClaims,
 	}, nil
 }
