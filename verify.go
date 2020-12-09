@@ -42,6 +42,11 @@ func (jwt VerifiedJWT) DecodeCustom(key string, into interface{}) error {
 	return json.Unmarshal(raw, into)
 }
 
+func (jwt VerifiedJWT) CustomString(key string) (string, error) {
+	var into string
+	return into, jwt.DecodeCustom(key, &into)
+}
+
 type StandardClaims struct {
 	Issuer    string        `json:"iss,omitempty"`
 	Subject   string        `json:"sub,omitempty"`
