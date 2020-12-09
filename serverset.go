@@ -29,10 +29,14 @@ func (ks Keyset) GetKeys(keyID string) []jose.JSONWebKey {
 // ServerSet polls multiple JWKS remotes, and merges the keys from them all
 type ServerSet struct {
 	servers       []*Server
+	directKeys    Keyset
 	statusAttempt *AnyAllWaitGroup
 	statusSuccess *AnyAllWaitGroup
 	Client        *http.Client
 	ErrorLogger   func(error)
+	jwksBytes     []byte
+	mutex         sync.RWMutex
+	jwksMutex     sync.RWMutex
 }
 
 func NewServerSet(urls ...string) (*ServerSet, error) {
@@ -57,6 +61,7 @@ func NewServerSet(urls ...string) (*ServerSet, error) {
 		statusAttempt: statusAttempt,
 		statusSuccess: statusSuccess,
 		Client:        client,
+		jwksBytes:     []byte(`{"keys":[]}`),
 	}
 
 	for _, server := range ss.servers {
@@ -66,7 +71,7 @@ func NewServerSet(urls ...string) (*ServerSet, error) {
 	return ss, nil
 }
 
-func (ss ServerSet) logError(err error) {
+func (ss *ServerSet) logError(err error) {
 	if ss.ErrorLogger == nil {
 		log.Printf("Failed to load JWKS: %s. (set ErrorLogger to supress or format this error)", err.Error())
 	} else {
@@ -74,8 +79,53 @@ func (ss ServerSet) logError(err error) {
 	}
 }
 
-func (ss *ServerSet) GetKeys(keyID string) []jose.JSONWebKey {
+func (ss *ServerSet) AddKey(key jose.JSONWebKey) {
+	ss.mutex.Lock()
+	ss.directKeys = append(ss.directKeys, key)
+	ss.mutex.Unlock()
+	ss.rebuildJWKS()
+}
+
+func (ss *ServerSet) rebuildJWKS() {
+	ss.jwksMutex.Lock()
+	defer ss.jwksMutex.Unlock()
 	keys := make([]jose.JSONWebKey, 0, 1)
+
+	for _, server := range ss.servers {
+		if server.keyset == nil {
+			continue
+		}
+		for _, key := range server.keyset.Keys {
+			keys = append(keys, key)
+		}
+	}
+
+	for _, key := range ss.directKeys {
+		keys = append(keys, key)
+	}
+
+	keySet := jose.JSONWebKeySet{
+		Keys: keys,
+	}
+
+	keyBytes, err := json.Marshal(keySet)
+	if err != nil {
+		return
+	}
+	ss.jwksBytes = keyBytes
+}
+
+func (ss *ServerSet) JWKS() []byte {
+	ss.jwksMutex.RLock()
+	defer ss.jwksMutex.RUnlock()
+	return ss.jwksBytes
+}
+
+func (ss *ServerSet) GetKeys(keyID string) []jose.JSONWebKey {
+	ss.mutex.RLock()
+	defer ss.mutex.RUnlock()
+	keys := make([]jose.JSONWebKey, 0, 1)
+
 	for _, server := range ss.servers {
 		if server.keyset == nil {
 			continue
@@ -87,6 +137,13 @@ func (ss *ServerSet) GetKeys(keyID string) []jose.JSONWebKey {
 
 		}
 	}
+
+	for _, key := range ss.directKeys {
+		if key.KeyID == keyID {
+			keys = append(keys, key)
+		}
+	}
+
 	return keys
 }
 
