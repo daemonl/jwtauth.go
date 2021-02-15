@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +14,15 @@ import (
 
 	"gopkg.in/square/go-jose.v2"
 )
+
+var Debug = os.Getenv("JWTAUTH_DEBUG") != ""
+
+func debug(msg string, params ...interface{}) {
+	if !Debug {
+		return
+	}
+	log.Printf(msg, params...)
+}
 
 type Keyset []jose.JSONWebKey
 
@@ -40,6 +50,7 @@ type ServerSet struct {
 }
 
 func NewServerSet(urls ...string) (*ServerSet, error) {
+	debug("Server Set URLs: %s", urls)
 	servers := make([]*Server, len(urls))
 
 	statusAttempt := NewAnyAllWaitGroup()
@@ -65,10 +76,21 @@ func NewServerSet(urls ...string) (*ServerSet, error) {
 	}
 
 	for _, server := range ss.servers {
-		go server.loop(statusAttempt.Child(), statusSuccess.Child(), ss)
+		ch := statusAttempt.Child()
+		doneAnything := doerFunc(func() {
+			ch.Done()
+			ss.rebuildJWKS()
+		})
+		go server.loop(doneAnything, statusSuccess.Child(), ss)
 	}
 
 	return ss, nil
+}
+
+type doerFunc func()
+
+func (f doerFunc) Done() {
+	f()
 }
 
 func (ss *ServerSet) logError(err error) {
@@ -167,9 +189,11 @@ type Server struct {
 func (ss *Server) loop(doneAnything, doneSuccess interface{ Done() }, onError interface{ logError(error) }) {
 	for {
 		refreshTime, err := ss.loadKeys()
+		debug("Attempt %s", ss.url)
 		if err != nil {
 			onError.logError(fmt.Errorf("failed to read JWKS from %s: %w", ss.url, err))
 		} else {
+			debug("Success from %s", ss.url)
 			doneSuccess.Done()
 		}
 		doneAnything.Done()
