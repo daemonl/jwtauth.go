@@ -16,7 +16,7 @@ func (err AuthError) Error() string {
 }
 
 type VerifiedJWT struct {
-	Raw map[string]json.RawMessage
+	Raw []byte
 	StandardClaims
 }
 
@@ -32,19 +32,6 @@ func FromContext(ctx context.Context) *VerifiedJWT {
 
 func ToContext(ctx context.Context, verified *VerifiedJWT) context.Context {
 	return context.WithValue(ctx, contextKey, verified)
-}
-
-func (jwt VerifiedJWT) DecodeCustom(key string, into interface{}) error {
-	raw, ok := jwt.Raw[key]
-	if !ok {
-		return fmt.Errorf("token has no key %s", key)
-	}
-	return json.Unmarshal(raw, into)
-}
-
-func (jwt VerifiedJWT) CustomString(key string) (string, error) {
-	var into string
-	return into, jwt.DecodeCustom(key, &into)
 }
 
 type StandardClaims struct {
@@ -136,17 +123,18 @@ func (verifier *Verifier) VerifyJWT(rawKey string) (*VerifiedJWT, error) {
 		return nil, AuthError("Invalid Token Data")
 	}
 
-	rawClaims := map[string]json.RawMessage{}
-	if err := json.Unmarshal(verifiedBytes, &rawClaims); err != nil {
-		return nil, AuthError("Invalid Token Data")
-	}
-
 	if time.Unix(standardClaims.Expiry, 0).Before(time.Now()) {
 		return nil, AuthError("Expired Token")
 	}
 
+	if standardClaims.NotBefore != 0 {
+		if time.Unix(standardClaims.NotBefore, 0).After(time.Now()) {
+			return nil, AuthError("Too Early to use, Not Before is still in the future")
+		}
+	}
+
 	return &VerifiedJWT{
-		Raw:            rawClaims,
+		Raw:            verifiedBytes,
 		StandardClaims: standardClaims,
 	}, nil
 }
